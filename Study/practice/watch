@@ -1,0 +1,146 @@
+#include <iostream>
+#include <iomanip>
+#include <ctime>
+#include <windows.h>
+#include <string>
+#include <conio.h>
+#include <cstdio>
+#include <fstream>
+
+using namespace std;
+
+const string CONFIG_FILE = "clock_config.txt";
+
+struct Config {
+    string city;
+};
+
+void saveConfig(const Config& cfg) {
+    ofstream file(CONFIG_FILE, ios::out | ios::trunc);
+    if (file.is_open()) {
+        file << cfg.city << endl;
+        file.close();
+    }
+}
+
+Config loadConfig() {
+    Config cfg;
+    cfg.city = "Beijing";
+    ifstream file(CONFIG_FILE);
+    if (file.is_open()) {
+        string line;
+        if (getline(file, line) && !line.empty()) cfg.city = line;
+        file.close();
+    }
+    saveConfig(cfg);
+    return cfg;
+}
+
+string getWeather(const string& city) {
+    if (city.empty()) return "N/A";
+    // 强制公制（摄氏度）
+    string cmd = "curl -s --max-time 5 \"wttr.in/" + city + "?format=%C+%t&m\"";
+    FILE* pipe = _popen(cmd.c_str(), "r");
+    if (!pipe) return "No curl";
+    char buffer[256];
+    string result;
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) result += buffer;
+    int exitCode = _pclose(pipe);
+    if (exitCode != 0) return "Net err";
+    while (!result.empty() && (result.back() == '\n' || result.back() == '\r')) result.pop_back();
+    return result.empty() ? "No data" : result;
+}
+
+int main() {
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
+
+    // 隐藏光标
+    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_CURSOR_INFO cursorInfo;
+    GetConsoleCursorInfo(hConsole, &cursorInfo);
+    cursorInfo.bVisible = false;
+    SetConsoleCursorInfo(hConsole, &cursorInfo);
+
+    Config config = loadConfig();
+    string city = config.city;
+    string weather = getWeather(city);
+    time_t lastWeatherUpdate = time(nullptr);
+
+    // 首次显示提示（仅一次）
+    cout << "\n  🕐 极简手表  |  按 C 切换城市，Q 退出\n" << endl;
+    Sleep(1500);
+
+    while (true) {
+        // 按键处理
+        if (_kbhit()) {
+            char ch = _getch();
+            if (ch == 'c' || ch == 'C') {
+                system("cls");
+                cout << "当前城市：" << city << "\n输入新城市（英文/拼音）：";
+                cursorInfo.bVisible = true;
+                SetConsoleCursorInfo(hConsole, &cursorInfo);
+                string newCity;
+                cin >> newCity;
+                cursorInfo.bVisible = false;
+                SetConsoleCursorInfo(hConsole, &cursorInfo);
+                if (!newCity.empty()) {
+                    city = newCity;
+                    config.city = city;
+                    weather = getWeather(city);
+                    lastWeatherUpdate = time(nullptr);
+                    saveConfig(config);
+                }
+                // 清除输入行，回到正常显示
+                system("cls");
+                continue;
+            }
+            else if (ch == 'q' || ch == 'Q') {
+                saveConfig(config);
+                system("cls");
+                cout << "\n再见！" << endl;
+                return 0;
+            }
+        }
+
+        // 时间
+        time_t now = time(nullptr);
+        tm* local = localtime(&now);
+        int hour = local->tm_hour;
+        int min = local->tm_min;
+        int sec = local->tm_sec;
+        int year = local->tm_year + 1900;
+        int month = local->tm_mon + 1;
+        int day = local->tm_mday;
+        int wday = local->tm_wday;
+        const char* weekdays[] = {"日", "一", "二", "三", "四", "五", "六"};
+
+        // 每30分钟更新天气
+        if (now - lastWeatherUpdate > 1800) {
+            weather = getWeather(city);
+            lastWeatherUpdate = now;
+        }
+
+        // 清屏并显示极简信息（类似手表）
+        system("cls");
+
+        // 时间（大号，居中）
+        cout << "\n\n";
+        cout << "        " << setw(2) << setfill('0') << hour << ":"
+             << setw(2) << setfill('0') << min << ":"
+             << setw(2) << setfill('0') << sec << "\n\n";
+
+        // 日期 + 星期
+        cout << "  " << year << "-" << setw(2) << setfill('0') << month << "-"
+             << setw(2) << setfill('0') << day << "  星期" << weekdays[wday] << "\n";
+
+        // 天气（一行）
+        cout << "  " << city << "  " << weather << "\n";
+
+        // 底部小提示
+        cout << "\n  [C]城市  [Q]退出" << endl;
+
+        Sleep(1000);
+    }
+    return 0;
+}
